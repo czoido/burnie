@@ -4,7 +4,7 @@ description: Generate and analyze a Claude Code session cost report. Use when th
 compatibility: Designed for Claude Code. Requires Python 3.9+ (run via `uvx burnie` or an installed `burnie`).
 allowed-tools: Bash
 metadata:
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 Generate a Claude Code cost analytics report and provide a reasoned analysis of where the money is going and how to reduce it.
