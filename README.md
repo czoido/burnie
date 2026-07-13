@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="burnie.png" alt="Burnie" width="200" />
+  <img src="https://raw.githubusercontent.com/czoido/burnie/main/burnie.png" alt="Burnie" width="200" />
 </p>
 
 <p align="center"><em>Some agents just want to watch your tokens burn.</em></p>
