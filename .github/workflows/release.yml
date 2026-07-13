@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from pyproject.toml
+        id: version
+        run: |
+          VERSION="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Remove old release drafts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DRAFT_IDS=$(gh api repos/${{ github.repository }}/releases --jq '.[] | select(.draft == true) | .id')
+          if [ -n "$DRAFT_IDS" ]; then
+            echo "$DRAFT_IDS" | xargs -I '{}' gh api -X DELETE repos/${{ github.repository }}/releases/'{}'
+          fi
+
+      - name: Create release draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --draft --title "v${{ steps.version.outputs.version }}" --generate-notes
+
+  publish:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/burnie/
+    permissions:
+      id-token: write # required for PyPI Trusted Publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Check tag matches pyproject.toml version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PYPROJECT_VERSION="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match pyproject.toml version $PYPROJECT_VERSION"
+            exit 1
+          fi
+
+      - name: Build
+        run: uv build
+
+      - name: Test the built wheel
+        run: |
+          uv venv /tmp/testenv
+          uv pip install --python /tmp/testenv/bin/python dist/*.whl
+          /tmp/testenv/bin/burnie --help
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always

@@ -1,0 +1,8 @@
+burnie-report.html
+.DS_Store
+METRICS.md
+__pycache__
+burnie-report.md
+uv.lock
+dist/
+*.egg-info/
