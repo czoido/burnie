@@ -58,12 +58,4 @@ Claude Code writes every session to a JSONL file at:
 ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
 ```
 
-Each assistant turn includes token usage. burnie reads those files, applies current model pricing from `src/burnie/pricing.py`, and surfaces the data.
-
-## Pricing
-
-Stored in `src/burnie/pricing.py`, the single source of truth. Run `/burnie-update` to refresh from Anthropic's pricing page.
-
----
-
-<p align="center">Burnie doesn't judge. It just burnies. 🔥</p>
+Each assistant turn includes token usage. burnie reads those files, applies current model pricing (bundled with the package and updated periodically as Anthropic changes its rates), and surfaces the data.
