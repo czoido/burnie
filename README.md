@@ -12,7 +12,7 @@
   <img src="https://raw.githubusercontent.com/czoido/burnie/main/assets/report.png" alt="burnie report" width="900" />
 </p>
 
-The hard part of a cost report isn't adding up tokens. It's not misleading you once you have the total. burnie judges a session against the ones that are actually comparable (same project, same model, similar length), so "expensive" means expensive *for work like this*, not just expensive against an average that the priciest sessions have already skewed. When it points at something, it stays careful about what it's actually claiming. It tells you *when* cost landed rather than inventing *why*. It won't call a repeated read "waste" when all the data proves is that it repeated. It won't quote a saving it can't compute. The result is a report you can act on without second-guessing whether the numbers are telling you a story that isn't there.
+The hard part of a cost report isn't adding up tokens. It's not misleading you once you have the total. burnie compares a session only against truly comparable ones (same project, same model, similar length), so "expensive" means expensive *for work like this*, not just above an average the priciest sessions have skewed. And it's careful about what it claims. It tells you *when* cost landed rather than inventing *why*, and it won't label a repeated read "waste" or quote a saving it can't compute. You get numbers you can act on without wondering whether they're telling you a story that isn't there.
 
 ## Features
 
@@ -58,9 +58,9 @@ The report is written to `burnie-report.html` in the current directory and opene
 
 ## Cost & privacy
 
-- **The dollar figures are API-equivalent costs**, computed from Anthropic's published API rates for each model. They are *not* necessarily what you're billed on a Pro or Max plan. Treat them as "what this usage would cost at API prices," useful for comparing sessions against each other, not as an invoice.
+- **The dollar figures are API-equivalent costs**, from Anthropic's published API rates. They are *not* necessarily what a Pro or Max plan bills you. Read them as "what this usage would cost at API prices," good for comparing sessions, not an invoice.
 - **The report is generated entirely on your machine.** No API key, no account access, no data leaves your computer. burnie only reads the JSONL files Claude Code already wrote to disk.
-- **The optional `/burnie` skill passes the condensed report to your own Claude Code session**, the one you're already running, so Claude can analyze it. That stays local to your session, and it isn't a call to any burnie backend (there isn't one).
+- **The optional `/burnie` skill passes the condensed report to your own running Claude Code session** for analysis. That stays local to your session, not a call to any burnie backend (there isn't one).
 
 ## How it works
 
