@@ -6,13 +6,12 @@
 
 ---
 
-**burnie** is a local cost analytics tool for Claude Code. It reads the session transcripts Claude Code stores on disk and tells you not just *how much* your sessions cost, but whether a given session was **abnormally** expensive, and what you can honestly say about *why*.
+**burnie** is a local cost analytics tool for Claude Code. It reads the session transcripts Claude Code stores on disk and tells you not just *how much* your sessions cost, but whether a given session was **abnormally** expensive, and what you can say about *why*.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/czoido/burnie/main/assets/report.png" alt="burnie report" width="900" />
 </p>
 
-The hard part of a cost report isn't adding up tokens. It's not misleading you once you have the total. burnie compares a session only against truly comparable ones (same project, same model, similar length), so "expensive" means expensive *for work like this*, not just above an average the priciest sessions have skewed. And it's careful about what it claims. It tells you *when* cost landed rather than inventing *why*, and it won't label a repeated read "waste" or quote a saving it can't compute. You get numbers you can act on without wondering whether they're telling you a story that isn't there.
 
 ## Features
 
