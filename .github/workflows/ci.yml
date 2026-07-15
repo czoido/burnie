@@ -21,11 +21,17 @@ jobs:
       - name: Install uv
         run: pip install uv
 
+      - name: Run tests
+        run: |
+          uv venv /tmp/testenv
+          uv pip install --python /tmp/testenv/bin/python -e ".[dev]"
+          /tmp/testenv/bin/pytest
+
       - name: Build
         run: uv build
 
       - name: Test the built wheel
         run: |
-          uv venv /tmp/testenv
-          uv pip install --python /tmp/testenv/bin/python dist/*.whl
-          /tmp/testenv/bin/burnie --help
+          uv venv /tmp/wheelenv
+          uv pip install --python /tmp/wheelenv/bin/python dist/*.whl
+          /tmp/wheelenv/bin/burnie --help

@@ -24,6 +24,9 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [project.urls]
 Homepage = "https://github.com/czoido/burnie"
 Repository = "https://github.com/czoido/burnie"
