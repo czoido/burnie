@@ -300,7 +300,7 @@ def _mcp_row(e, project_name_by_path):
         )
     return (
         f'<tr><td class="insight-file">{_escape_html(e["server"])}</td>'
-        f'<td class="insight-count" style="color:var(--muted)">{scope_label}</td>'
+        f'<td style="color:var(--muted)">{scope_label}</td>'
         f'<td>{used_html}{tip_html}</td></tr>'
     )
 
