@@ -78,6 +78,63 @@ def _is_user_rejection(content):
     return isinstance(content, str) and _REJECTION_SNIPPET in content.lower()
 
 
+# Folds one assistant message's usage into the running per-model/per-day totals and returns its
+# dollar cost. Shared by the main transcript loop and the subagent-transcript pass below, since
+# both need the exact same accumulation to keep session totals accurate regardless of which file
+# a turn's usage came from.
+def _accumulate_model_usage(u, m, timestamp, per_model, per_model_cost, per_day):
+    pm = per_model.setdefault(m, {'input': 0, 'output': 0, 'cacheWrite5m': 0, 'cacheWrite1h': 0, 'cacheRead': 0})
+    cache_creation = u.get('cache_creation') or {}
+    pm['input'] += u.get('input_tokens') or 0
+    pm['output'] += u.get('output_tokens') or 0
+    pm['cacheWrite5m'] += cache_creation.get('ephemeral_5m_input_tokens', u.get('cache_creation_input_tokens') or 0)
+    pm['cacheWrite1h'] += cache_creation.get('ephemeral_1h_input_tokens', 0)
+    pm['cacheRead'] += u.get('cache_read_input_tokens') or 0
+    comp = calc_cost_components(u, m, timestamp)
+    msg_cost = comp['input'] + comp['output'] + comp['cacheWrite'] + comp['cacheRead']
+    pmc = per_model_cost.setdefault(m, {'input': 0.0, 'output': 0.0, 'cacheWrite': 0.0, 'cacheRead': 0.0, 'cacheSavings': 0.0, 'total': 0.0})
+    pmc['input'] += comp['input']
+    pmc['output'] += comp['output']
+    pmc['cacheWrite'] += comp['cacheWrite']
+    pmc['cacheRead'] += comp['cacheRead']
+    pmc['cacheSavings'] += comp['cacheSavings']
+    pmc['total'] += msg_cost
+    # Bucketed by this message's own timestamp, not the session's start day, because a
+    # session can run past midnight, and Anthropic's usage dashboard counts tokens
+    # on the day they were actually sent, not the day the session began.
+    if timestamp:
+        day = timestamp[:10]
+        per_day[day] = per_day.get(day, 0.0) + msg_cost
+    return msg_cost
+
+
+# Claude Code writes each Agent/Task tool dispatch to its own transcript, not inlined into the
+# main session file: <project_dir>/<session_id>/subagents/agent-*.jsonl, a sibling directory named
+# after the session, next to <session_id>.jsonl itself. Sessions that never used a subagent have
+# no such directory.
+def _iter_subagent_events(session_file_path):
+    base_dir = os.path.dirname(session_file_path)
+    session_id = os.path.splitext(os.path.basename(session_file_path))[0]
+    subagents_dir = os.path.join(base_dir, session_id, 'subagents')
+    if not os.path.isdir(subagents_dir):
+        return
+    for name in sorted(os.listdir(subagents_dir)):
+        if not name.endswith('.jsonl'):
+            continue
+        try:
+            with open(os.path.join(subagents_dir, name), 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            continue
+
+
 def _parse_timestamp(ts):
     try:
         return datetime.fromisoformat(ts.replace('Z', '+00:00'))
@@ -100,7 +157,12 @@ def _parse_session_file(file_path):
     title = None
     cwd = None
     entrypoint = None
-    per_model = {}  # { modelName: { input, output, cacheWrite5m, cacheWrite1h, cacheRead } }
+    per_model = {}  # { modelName: { input, output, cacheWrite5m, cacheWrite1h, cacheRead } }: includes
+                     # subagent turns too, so dollar/token totals stay accurate regardless of thread
+    main_thread_models = []  # ordered, de-duped models from the main thread only, for display (the
+                              # "Model" tags and peer-comparison cohort matching): a subagent's own
+                              # model choice (often a cheaper default) isn't "which model you talked
+                              # to" and would otherwise crowd the tag list and fragment peer cohorts
     per_model_cost = {}  # { modelName: { input, output, cacheWrite, cacheRead, cacheSavings, total } }: dollar
                           # amounts, accumulated per message using that message's own timestamp, so a session
                           # spanning a price change gets the correct total instead of one reconstructed later
@@ -137,6 +199,17 @@ def _parse_session_file(file_path):
     per_day = {}            # { 'YYYY-MM-DD': cost }, bucketed by each message's own timestamp,
                              # not the session's start day, since a session can run past midnight
                              # and Anthropic's usage dashboard counts tokens on the day spent
+    last_permission_mode = None    # only real user prompts carry permissionMode (tool_result
+                                    # events don't), so it's tracked like last_model and applied
+                                    # forward to every assistant turn until the next prompt updates it
+    permission_mode_counts = {}    # { mode: assistant-turn count }
+    permission_mode_cost = {}      # { mode: dollar cost }, same per-turn attribution as permission_mode_counts
+    agent_message_count = 0  # assistant turns from a subagent (Task/Agent tool call), isSidechain in the
+                              # transcript: a separate context that resets per call, so folding it into
+                              # message_count/input_per_msg would pollute the main thread's turn count and
+                              # context-growth curve with a different conversation's turns
+    agent_cost = 0.0          # dollar cost of those subagent turns, still folded into per_model_cost/`cost`
+                               # below (it's real spend either way), just tracked separately for display
 
     for ev in events:
         ev_type = ev.get('type')
@@ -148,6 +221,8 @@ def _parse_session_file(file_path):
                 cwd = ev['cwd']
             if not entrypoint and ev.get('entrypoint'):
                 entrypoint = ev['entrypoint']
+            if ev.get('permissionMode'):
+                last_permission_mode = ev['permissionMode']
             content = (ev.get('message') or {}).get('content')
             if isinstance(content, list):
                 for part in content:
@@ -219,38 +294,58 @@ def _parse_session_file(file_path):
             msg_cost = 0.0
             if m and m != '<synthetic>':
                 last_model = m
-                pm = per_model.setdefault(m, {'input': 0, 'output': 0, 'cacheWrite5m': 0, 'cacheWrite1h': 0, 'cacheRead': 0})
-                cache_creation = u.get('cache_creation') or {}
-                pm['input'] += u.get('input_tokens') or 0
-                pm['output'] += u.get('output_tokens') or 0
-                pm['cacheWrite5m'] += cache_creation.get('ephemeral_5m_input_tokens', u.get('cache_creation_input_tokens') or 0)
-                pm['cacheWrite1h'] += cache_creation.get('ephemeral_1h_input_tokens', 0)
-                pm['cacheRead'] += u.get('cache_read_input_tokens') or 0
-                comp = calc_cost_components(u, m, ev.get('timestamp'))
-                msg_cost = comp['input'] + comp['output'] + comp['cacheWrite'] + comp['cacheRead']
-                pmc = per_model_cost.setdefault(m, {'input': 0.0, 'output': 0.0, 'cacheWrite': 0.0, 'cacheRead': 0.0, 'cacheSavings': 0.0, 'total': 0.0})
-                pmc['input'] += comp['input']
-                pmc['output'] += comp['output']
-                pmc['cacheWrite'] += comp['cacheWrite']
-                pmc['cacheRead'] += comp['cacheRead']
-                pmc['cacheSavings'] += comp['cacheSavings']
-                pmc['total'] += msg_cost
-                # Bucketed by this message's own timestamp, not the session's start day, because a
-                # session can run past midnight, and Anthropic's usage dashboard counts tokens
-                # on the day they were actually sent, not the day the session began.
-                if ev.get('timestamp'):
-                    day = ev['timestamp'][:10]
-                    per_day[day] = per_day.get(day, 0.0) + msg_cost
-            # Total context size this turn = fresh input + cached tokens (both create and read)
-            input_per_msg.append((u.get('input_tokens') or 0) + (u.get('cache_read_input_tokens') or 0) + (u.get('cache_creation_input_tokens') or 0))
-            cost_per_msg.append(msg_cost)
-            msg_timestamps.append(ev.get('timestamp'))
-            msg_ids.append(message.get('id'))
-            message_count += 1
+                if m not in main_thread_models:
+                    main_thread_models.append(m)
+                msg_cost = _accumulate_model_usage(u, m, ev.get('timestamp'), per_model, per_model_cost, per_day)
+            mode_key = last_permission_mode or 'unknown'
+            permission_mode_counts[mode_key] = permission_mode_counts.get(mode_key, 0) + 1
+            permission_mode_cost[mode_key] = permission_mode_cost.get(mode_key, 0.0) + msg_cost
+            if ev.get('isSidechain'):
+                agent_message_count += 1
+                agent_cost += msg_cost
+            else:
+                # Total context size this turn = fresh input + cached tokens (both create and read)
+                input_per_msg.append((u.get('input_tokens') or 0) + (u.get('cache_read_input_tokens') or 0) + (u.get('cache_creation_input_tokens') or 0))
+                cost_per_msg.append(msg_cost)
+                msg_timestamps.append(ev.get('timestamp'))
+                msg_ids.append(message.get('id'))
+                message_count += 1
             if ev.get('timestamp'):
                 if not first_timestamp:
                     first_timestamp = ev['timestamp']
                 last_timestamp = ev['timestamp']
+
+    # Subagent (Task/Agent tool) turns: real spend, folded into per_model/per_model_cost/usage/
+    # per_day/cost like any other turn, but kept out of message_count/input_per_msg (the main
+    # thread's own turn count and context-growth curve) and tracked separately as agent_message_count/
+    # agent_cost so the two don't get conflated. Attributed to the session's last-seen permission
+    # mode: subagent transcripts carry no permissionMode of their own, and by the time a subagent
+    # runs, the mode active at the end of the main thread is the closest approximation available.
+    for ev in _iter_subagent_events(file_path):
+        message = ev.get('message') or {}
+        if ev.get('type') != 'assistant' or not message.get('usage'):
+            continue
+        msg_id = message.get('id')
+        if msg_id and msg_id in counted_message_ids:
+            continue
+        if msg_id:
+            counted_message_ids.add(msg_id)
+        u = message['usage']
+        m = message.get('model')
+        if not m or m == '<synthetic>':
+            continue
+        msg_cost = _accumulate_model_usage(u, m, ev.get('timestamp'), per_model, per_model_cost, per_day)
+        agent_message_count += 1
+        agent_cost += msg_cost
+        mode_key = last_permission_mode or 'unknown'
+        permission_mode_counts[mode_key] = permission_mode_counts.get(mode_key, 0) + 1
+        permission_mode_cost[mode_key] = permission_mode_cost.get(mode_key, 0.0) + msg_cost
+        ts = ev.get('timestamp')
+        if ts:
+            if not first_timestamp or ts < first_timestamp:
+                first_timestamp = ts
+            if not last_timestamp or ts > last_timestamp:
+                last_timestamp = ts
 
     # Aggregate totals across all models
     usage = {'input': 0, 'output': 0, 'cacheWrite': 0, 'cacheRead': 0}
@@ -259,17 +354,16 @@ def _parse_session_file(file_path):
         usage['output'] += u['output']
         usage['cacheWrite'] += u['cacheWrite5m'] + u['cacheWrite1h']
         usage['cacheRead'] += u['cacheRead']
-    # sum(cost_per_msg), not a recomputation from aggregated per-model totals, because each message
-    # already carries its own correctly-dated cost, so this can't drift from a pricing change
-    # mid-session the way reconstructing from a single date would.
-    cost = sum(cost_per_msg)
+    # cost_per_msg now excludes subagent turns (tracked separately as agent_cost), so the session
+    # total is cost_per_msg's sum plus agent_cost, not cost_per_msg alone.
+    cost = sum(cost_per_msg) + agent_cost
 
     # Primary model = highest cost contributor
     model = 'unknown'
     if per_model_cost:
         model = max(per_model_cost.items(), key=lambda item: item[1]['total'])[0]
 
-    models = list(per_model.keys())
+    models = main_thread_models
     total_tools = sum(tool_counts.values())
     repeated_calls = sorted(
         (
@@ -322,6 +416,8 @@ def _parse_session_file(file_path):
         'compactions': compactions, 'costAfterFirstCompaction': cost_after_first_compaction,
         'cacheHitRate': cache_hit_rate, 'durationMinutes': duration_minutes, 'entrypoint': entrypoint,
         'filesChanged': sorted(files_changed),
+        'permissionModeCounts': permission_mode_counts, 'permissionModeCost': permission_mode_cost,
+        'agentMessageCount': agent_message_count, 'agentCost': agent_cost,
     }
 
 

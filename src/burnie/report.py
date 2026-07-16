@@ -6,6 +6,9 @@ from importlib import resources
 from .pricing import get_context_window, get_model_pricing, PRICING_UPDATED
 
 COLORS = ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd', '#06b6d4', '#0891b2', '#0e7490', '#155e75', '#10b981', '#059669', '#047857', '#065f46']
+# Raw permissionMode values from the JSONL, as Claude Code's UI names them (Shift+Tab cycles
+# through these). 'unknown' covers turns before any prompt in the transcript carried the field.
+PERMISSION_MODE_LABEL = {'default': 'Manual', 'acceptEdits': 'Edit automatically', 'plan': 'Plan', 'auto': 'Auto', 'unknown': 'Unknown'}
 MIN_SESSIONS_FOR_PERCENTILES = 10
 # Cohorts (same project + model) are inherently smaller than the whole session set, so this uses a lower bar
 # than MIN_SESSIONS_FOR_PERCENTILES, below which p90/p95 would just be restating the max.
@@ -221,6 +224,10 @@ def _session_entry(s, idx, sessions_len, observed_compact_floor):
         'cacheHitRate': s.get('cacheHitRate'),
         'durationMinutes': s.get('durationMinutes'),
         'entrypoint': s.get('entrypoint'),
+        'permissionModeCounts': s.get('permissionModeCounts') or {},
+        'permissionModeCost': s.get('permissionModeCost') or {},
+        'agentMessageCount': s.get('agentMessageCount') or 0,
+        'agentCost': s.get('agentCost') or 0.0,
         'projectPath': s.get('projectPath') or '',
         # Every day this session had activity on, not just the start day, so a session that
         # spans midnight still shows up when clicking either day in the daily chart.
@@ -355,6 +362,14 @@ def generate_report(sessions, highlight_session=None, icon=None, mcp_servers=Non
         key = s.get('entrypoint') or 'unknown'
         by_entrypoint[key] = by_entrypoint.get(key, 0) + s['cost']
     entrypoint_entries = sorted(by_entrypoint.items(), key=lambda kv: kv[1], reverse=True)
+
+    # Per-turn attribution (not whole-session, since a session can switch modes mid-way), summed
+    # from each session's own permissionModeCost so this can't drift from the per-turn figures
+    # shown in session detail.
+    by_permission_mode = {}
+    for s in sessions:
+        for mode, c in (s.get('permissionModeCost') or {}).items():
+            by_permission_mode[mode] = by_permission_mode.get(mode, 0) + c
     entrypoint_names = [n for n, _ in entrypoint_entries]
     entrypoint_costs = [c for _, c in entrypoint_entries]
     # A doughnut chart where one slice is >95% isn't a comparison, it's just restating the total.
@@ -738,6 +753,27 @@ def generate_report(sessions, highlight_session=None, icon=None, mcp_servers=Non
       <div class="chart-wrap" style="height:300px"><canvas id="chartEntrypoint"></canvas></div>
     </div>""" if show_entrypoint_chart else ''
 
+    permission_mode_entries = sorted(by_permission_mode.items(), key=lambda kv: kv[1], reverse=True)
+    total_permission_mode_cost = sum(c for _, c in permission_mode_entries) or 1
+    permission_mode_rows = ''.join(
+        f"""
+          <div class="kpi-model-row">
+            <span class="kpi-model-name">{PERMISSION_MODE_LABEL.get(mode, mode)} <span style="color:var(--muted)">({_fmt_pct(c / total_permission_mode_cost * 100)})</span></span>
+            <div class="kpi-model-bar-wrap">
+              <div class="kpi-model-bar" style="width:{_js_round(c / total_permission_mode_cost * 100)}%"></div>
+            </div>
+            <span class="kpi-model-cost">{_fmt_short(c)}</span>
+          </div>"""
+        for mode, c in permission_mode_entries
+    )
+    permission_mode_chart_card = f"""
+    <div class="chart-card">
+      <h2>Cost by permission mode <span class="tip" tabindex="0" data-tip="Which permission mode was active when each turn ran (Manual asks before every tool call, Edit automatically accepts file edits, Plan is read-only, Auto runs without asking). Attributed per turn, so a session that switched modes midway splits its cost across both.">?</span></h2>
+      <div class="kpi-model-list" style="margin-top:16px">
+        {permission_mode_rows}
+      </div>
+    </div>""" if len(permission_mode_entries) > 1 else ''
+
     project_name_by_path = {s['projectPath']: s['projectName'] for s in sessions}
     mcp_chart_card = ''
     if mcp_servers:
@@ -766,7 +802,7 @@ def generate_report(sessions, highlight_session=None, icon=None, mcp_servers=Non
         {project_rows}
         </tbody>
       </table>
-    </div>{entrypoint_chart_card}{mcp_chart_card}
+    </div>{entrypoint_chart_card}{permission_mode_chart_card}{mcp_chart_card}
   </div>
 
 """
@@ -1500,6 +1536,10 @@ _STATIC_HEAD = """<!DOCTYPE html>
   table { width: 100%; border-collapse: collapse; }
   .table-scroll { overflow-x: auto; }
   .table-scroll table { min-width: 640px; }
+  /* With Model/Mode/Msgs columns now carrying tags and badges, letting cells wrap made rows
+     taller and harder to scan. Widening the table and relying on this container's horizontal
+     scroll (already in place) keeps every row a single line instead. */
+  .table-scroll th, .table-scroll td { white-space: nowrap; }
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
   td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
   .session-row { cursor: pointer; }
@@ -1606,6 +1646,7 @@ _STATIC_SESSIONS_PANEL = """  <!-- Sessions detail panel -->
           <th>Project</th>
           <th>Date</th>
           <th>Model</th>
+          <th>Mode</th>
           <th style="text-align:right">Msgs</th>
           <th style="text-align:right">Cost</th>
         </tr>
@@ -1864,6 +1905,8 @@ function toggleRow(idx) {
   openRow = isOpen ? idx : null
 }
 
+const MODE_LABEL = { default: 'Manual', acceptEdits: 'Edit automatically', plan: 'Plan', auto: 'Auto', unknown: 'Unknown' }
+
 function renderTable() {
   const rows = filtered()
   const tbody = document.getElementById('sessionsTbody')
@@ -1881,6 +1924,14 @@ function renderTable() {
       { pct: s.cacheReadCost  / total * 100, color: '#10b981' },
     ]
 
+    // Predominant mode by turn count (not cost): "what share of this session's turns ran under
+    // each mode" is the more direct answer to "was this mostly auto/manual/etc.", cost skews
+    // toward whichever turns happened to carry heavy context.
+    const modeEntries = Object.entries(s.permissionModeCounts || {}).sort((a, b) => b[1] - a[1])
+    const modeTurnTotal = modeEntries.reduce((sum, [, n]) => sum + n, 0)
+    const topMode = modeEntries[0]
+    const topModePct = topMode && modeTurnTotal > 0 ? Math.round(topMode[1] / modeTurnTotal * 100) : null
+
     const sessionRow = document.createElement('tr')
     sessionRow.className = 'session-row' + (HIGHLIGHT_SESSION && s.id === HIGHLIGHT_SESSION ? ' highlighted' : '')
     sessionRow.id = 'row-' + i
@@ -1891,7 +1942,8 @@ function renderTable() {
       <td><span class="tag tag-clickable">${escapeHtml(s.project)}</span></td>
       <td style="color:var(--muted);font-variant-numeric:tabular-nums">${s.date}</td>
       <td>${s.models.map(m => `<span class="tag">${m}</span>`).join(' ')}</td>
-      <td style="text-align:right;color:var(--muted)">${s.messages}</td>
+      <td>${topMode ? `<span class="tag" title="${escapeHtml(modeEntries.map(([m, n]) => `${MODE_LABEL[m] || m}: ${Math.round(n / modeTurnTotal * 100)}%`).join(', '))}">${MODE_LABEL[topMode[0]] || topMode[0]} ${topModePct}%</span>` : '-'}</td>
+      <td style="text-align:right;color:var(--muted)">${s.messages}${s.agentMessageCount > 0 ? ` <span style="font-size:10px" title="${s.agentMessageCount} additional turn${s.agentMessageCount !== 1 ? 's' : ''} from subagents (Agent/Task tool calls), ${fmt(s.agentCost)} of this session's cost">+${s.agentMessageCount}</span>` : ''}</td>
       <td class="cost-pill" style="text-align:right"><span style="display:flex;align-items:center;justify-content:flex-end;gap:6px">${s.costRankPct !== null && s.costRankPct <= 10 ? `<span style="color:var(--amber);font-weight:700;font-size:11px" title="Top ${Math.max(1, Math.round(s.costRankPct))}% priciest session, worth opening to see why">${'🔥'.repeat(Math.max(1, Math.min(5, 6 - Math.ceil(s.costRankPct / 2))))}</span>` : ''}${fmt(s.cost)}</span></td>
     `
     // Bound via closure, not interpolated into the onclick markup above, because s.project is
@@ -1911,6 +1963,13 @@ function renderTable() {
       .map(([name, n]) => `<li style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
         <span style="font-family:monospace;color:var(--muted)">${name}</span>
         <span style="flex-shrink:0;color:var(--muted)">${Math.round(n / s.totalTools * 100)}% <span style="color:var(--text);font-weight:600">${n}</span></span>
+      </li>`).join('')
+
+    // --- permission mode breakdown: turn share (left) alongside the cost that share carried
+    // (right), since a mode can dominate turn count without dominating the bill or vice versa ---
+    const modeRows = modeEntries.map(([mode, n]) => `<li style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--muted)">${MODE_LABEL[mode] || mode}</span>
+        <span style="flex-shrink:0;color:var(--muted)">${Math.round(n / modeTurnTotal * 100)}% <span style="color:var(--text);font-weight:600">${n}</span> · ${fmt((s.permissionModeCost || {})[mode] || 0)}</span>
       </li>`).join('')
 
     // --- errors: tool + what was attempted + the actual error message. Grouped by exact match
@@ -2038,7 +2097,7 @@ function renderTable() {
     const reviewItems = []
     if (maxRepeatedFailure >= 3) reviewItems.push(`the same error signature appeared ${maxRepeatedFailure} times`)
 
-    detailRow.innerHTML = `<td colspan="7">
+    detailRow.innerHTML = `<td colspan="8">
       <div class="detail-inner">
         <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-radius:8px;font-size:13px">
           <div><strong>Why this cost ${fmt(s.cost)}:</strong> ${whyParts.join(' · ') || 'too small to break down'}</div>
@@ -2082,6 +2141,7 @@ function renderTable() {
               `Duration ${durationStr} <span class="tip" tabindex="0" data-tip="First to last message timestamp, includes any idle time the session sat open, not just active work">?</span>`,
               s.cacheHitRate !== null ? `Cache reuse ${Math.round(s.cacheHitRate * 100)}% <span class="tip" tabindex="0" data-tip="Share of cacheable tokens served from cache instead of resent as fresh input. Mostly a byproduct of session length and how much context is being carried forward, not a score to maximize.">?</span>` : '',
               s.cacheROI !== null ? `Cache ROI ${s.cacheROI.toFixed(1)}× <span class="tip" tabindex="0" data-tip="Money saved by cache reads, divided by money spent writing cache. Mostly driven by how long the session ran, not something you directly control, technical detail, not a signal to act on.">?</span>` : '',
+              s.agentMessageCount > 0 ? `Subagent turns ${s.agentMessageCount}, ${fmt(s.agentCost)} <span class="tip" tabindex="0" data-tip="Turns run inside a subagent (Agent/Task tool call), a separate context from the main thread. Counted toward this session's total cost above, but excluded from Msgs and the context chart, which track the main thread only.">?</span>` : '',
             ].filter(Boolean).join(' · ')}
           </div>
         </details>
@@ -2108,6 +2168,10 @@ function renderTable() {
               ? `<ul class="file-list" style="max-height:220px">${toolRows}</ul>`
               : '<span class="empty-note">No tool calls recorded</span>'}
           </div>
+          ${modeEntries.length > 0 ? `<div class="detail-section">
+            <h4>Permission mode <span class="tip" tabindex="0" data-tip="Which mode was active turn by turn, by the permission mode set when each prompt was sent.">?</span></h4>
+            <ul class="file-list" style="max-height:220px">${modeRows}</ul>
+          </div>` : ''}
           ${s.toolErrors.length > 0 ? `<div class="detail-section">
             <h4>Errors · ${s.toolErrors.length}</h4>
             <ul class="file-list" style="max-height:220px">${errorRows}</ul>
