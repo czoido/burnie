@@ -6,7 +6,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from .parser import load_all_sessions
+from .parser import load_all_sessions, load_mcp_servers
 from .report import generate_report, generate_markdown_report, generate_raw_report
 
 
@@ -98,7 +98,7 @@ def main():
 
     if args.raw:
         sessions = load_all_sessions()
-        print(generate_raw_report(sessions, highlight_session=args.session))
+        print(generate_raw_report(sessions, highlight_session=args.session, mcp_servers=load_mcp_servers(sessions)))
         return
 
     out_file = args.output_file or ('burnie-report.md' if args.markdown else 'burnie-report.html')
@@ -110,7 +110,7 @@ def main():
 
     content = (
         generate_markdown_report(sessions) if args.markdown
-        else generate_report(sessions, highlight_session=args.session, icon=_load_icon())
+        else generate_report(sessions, highlight_session=args.session, icon=_load_icon(), mcp_servers=load_mcp_servers(sessions))
     )
     out_path.write_text(content, encoding='utf-8')
     print(f'Report written to: {out_path}')

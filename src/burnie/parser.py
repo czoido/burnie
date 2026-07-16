@@ -6,7 +6,7 @@ from datetime import datetime
 
 from .pricing import calc_cost_components, PRICING_UPDATED
 
-__all__ = ['load_all_sessions', 'PRICING_UPDATED']
+__all__ = ['load_all_sessions', 'load_mcp_servers', 'PRICING_UPDATED']
 
 
 # Bash commands that just move around or look, without redoing any real work. Repeating one
@@ -390,3 +390,99 @@ def load_all_sessions():
 
     sessions.sort(key=lambda s: s.get('firstTimestamp') or '', reverse=True)
     return sessions
+
+
+def _mcp_server_from_tool_name(name):
+    if not name or not name.startswith('mcp__'):
+        return None
+    parts = name.split('__', 2)
+    return parts[1] if len(parts) >= 2 and parts[1] else None
+
+
+def _load_claude_json():
+    path = os.path.join(os.path.expanduser('~'), '.claude.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _load_project_mcp_json_servers(project_path):
+    try:
+        with open(os.path.join(project_path, '.mcp.json'), 'r', encoding='utf-8') as f:
+            return json.load(f).get('mcpServers') or {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+_MCP_STATUS_ORDER = {'move-candidate': 0, 'unused': 1, 'ok': 2}
+
+
+# used_in: [{'project': path, 'count': N}, ...], sorted by count descending
+def _classify_mcp_entry(server, scope, project, used_in):
+    entry = {'server': server, 'scope': scope, 'project': project, 'usedIn': used_in}
+    if scope == 'user':
+        if not used_in:
+            entry['status'] = 'unused'
+        elif len(used_in) == 1:
+            entry['status'] = 'move-candidate'
+            entry['moveTo'] = used_in[0]['project']
+        else:
+            entry['status'] = 'ok'
+    else:
+        entry['status'] = 'ok' if used_in else 'unused'
+    return entry
+
+
+# Claude Code sends every configured MCP server's tool schemas on every turn, whether or not
+# that server's tools are actually called, so a server configured but never invoked is pure
+# per-turn context overhead with no observed benefit. Three underlying scopes each carry a
+# different fix: 'user' (~/.claude.json top-level mcpServers, loads in every project) is a
+# move-to-project-scope candidate if usage is confined to one project; 'local'
+# (~/.claude.json projects[path].mcpServers, private to one project) and 'project'
+# (<path>/.mcp.json, shared via the repo) are already as narrow as they can get, so unused
+# there just means "worth inspecting." Both are reported to the caller as 'local', since the
+# private-vs-shared-via-repo distinction doesn't change the fix. Only covers projects that
+# actually have parsed session data: a project with no sessions has no cost story either, so
+# there's nothing for this report to say about it.
+def load_mcp_servers(sessions):
+    usage_by_project = {}  # projectPath -> { server: total tool_use calls }
+    for s in sessions:
+        proj = s['projectPath']
+        for name, count in s['toolCounts'].items():
+            server = _mcp_server_from_tool_name(name)
+            if server:
+                bucket = usage_by_project.setdefault(proj, {})
+                bucket[server] = bucket.get(server, 0) + count
+
+    def _used_in(name, project_path=None):
+        if project_path:
+            count = usage_by_project.get(project_path, {}).get(name)
+            return [{'project': project_path, 'count': count}] if count else []
+        return sorted(
+            ({'project': p, 'count': counts[name]} for p, counts in usage_by_project.items() if name in counts),
+            key=lambda u: u['count'], reverse=True,
+        )
+
+    claude_json = _load_claude_json()
+    entries = []
+
+    for name in (claude_json.get('mcpServers') or {}):
+        entries.append(_classify_mcp_entry(name, 'user', None, _used_in(name)))
+
+    projects_cfg = claude_json.get('projects') or {}
+    for project_path in sorted({s['projectPath'] for s in sessions}):
+        proj_cfg = projects_cfg.get(project_path) or {}
+
+        for name in (proj_cfg.get('mcpServers') or {}):
+            entries.append(_classify_mcp_entry(name, 'local', project_path, _used_in(name, project_path)))
+
+        disabled = set(proj_cfg.get('disabledMcpjsonServers') or [])
+        for name in _load_project_mcp_json_servers(project_path):
+            if name in disabled:
+                continue
+            entries.append(_classify_mcp_entry(name, 'local', project_path, _used_in(name, project_path)))
+
+    entries.sort(key=lambda e: (_MCP_STATUS_ORDER[e['status']], e['server']))
+    return entries

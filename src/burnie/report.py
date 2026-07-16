@@ -261,7 +261,51 @@ def _session_why_review(e):
     return why, (', '.join(review) if review else '-')
 
 
-def generate_report(sessions, highlight_session=None, icon=None):
+def _mcp_project_display(path, project_name_by_path):
+    # Falls back to the last path segment for a project ~/.claude.json knows about but that has
+    # no parsed session data (so it never earned an entry in project_name_by_path).
+    if path in project_name_by_path:
+        return project_name_by_path[path]
+    return (path or '').rstrip('/').rsplit('/', 1)[-1] or path
+
+
+def _mcp_project_chip(name, count):
+    # Reuses the same click target the project table/"Review X" links already use, so
+    # clicking a project here filters the sessions table below to it, same as everywhere else.
+    return (
+        f'<span class="inline-link project-bar-row" data-project="{_escape_html(name)}">{_escape_html(name)}</span>'
+        f' <span style="color:var(--muted)">({count}&times;)</span>'
+    )
+
+
+def _mcp_row(e, project_name_by_path):
+    scope_label = 'Global' if e['scope'] == 'user' else 'Local'
+    if not e['usedIn']:
+        # No chip for a local-scoped server tied to a project with no session data: there's
+        # nothing in the sessions table to filter to, so it's shown as plain text, not a link.
+        project_note = f' ({_escape_html(_mcp_project_display(e["project"], project_name_by_path))})' if e['scope'] != 'user' else ''
+        used_html = f'<span style="color:var(--muted)">No usage detected{project_note}</span>'
+    else:
+        used_html = ', '.join(
+            _mcp_project_chip(project_name_by_path.get(u['project'], u['project']), u['count'])
+            for u in e['usedIn']
+        )
+    tip_html = ''
+    if e['status'] == 'move-candidate':
+        move_proj = project_name_by_path.get(e['moveTo'], e['moveTo'])
+        tip_html = (
+            ' <span class="tip" tabindex="0" data-tip="Configured globally but only used in '
+            f'{_escape_html(move_proj)}. Move it into that project\'s .mcp.json so it stops loading '
+            '(and adding tool-schema overhead) in every other project.">?</span>'
+        )
+    return (
+        f'<tr><td class="insight-file">{_escape_html(e["server"])}</td>'
+        f'<td class="insight-count" style="color:var(--muted)">{scope_label}</td>'
+        f'<td>{used_html}{tip_html}</td></tr>'
+    )
+
+
+def generate_report(sessions, highlight_session=None, icon=None, mcp_servers=None):
     total_cost = sum(s['cost'] for s in sessions)
     total_cache_write = sum(s['usage']['cacheWrite'] for s in sessions)
     total_cache_read = sum(s['usage']['cacheRead'] for s in sessions)
@@ -694,6 +738,21 @@ def generate_report(sessions, highlight_session=None, icon=None):
       <div class="chart-wrap" style="height:300px"><canvas id="chartEntrypoint"></canvas></div>
     </div>""" if show_entrypoint_chart else ''
 
+    project_name_by_path = {s['projectPath']: s['projectName'] for s in sessions}
+    mcp_chart_card = ''
+    if mcp_servers:
+        mcp_rows = ''.join(_mcp_row(e, project_name_by_path) for e in mcp_servers)
+        mcp_chart_card = f"""
+    <div class="chart-card wide">
+      <h2>MCP servers <span class="tip" tabindex="0" data-tip="Every configured MCP server's tool schemas are sent on every turn whether or not they're called. Global scope loads in every project; local scope loads in only one. Usage is only what's observed in these sessions via actual tool calls, so 'No usage detected' means not seen here, not proven unused.">?</span></h2>
+      <table class="insight-table" style="table-layout:fixed;width:100%">
+        <thead><tr><th style="text-align:left;color:var(--muted);font-size:10px;padding:0 4px 6px 0">Server</th><th style="width:150px;text-align:left;color:var(--muted);font-size:10px;padding:0 4px 6px">Scope</th><th style="text-align:left;color:var(--muted);font-size:10px;padding:0 0 6px 4px">Used in</th></tr></thead>
+        <tbody>
+        {mcp_rows}
+        </tbody>
+      </table>
+    </div>"""
+
     charts_grid_html = f"""  <div class="charts-grid">
     <div class="chart-card wide">
       <h2>Daily cost</h2>
@@ -707,7 +766,7 @@ def generate_report(sessions, highlight_session=None, icon=None):
         {project_rows}
         </tbody>
       </table>
-    </div>{entrypoint_chart_card}
+    </div>{entrypoint_chart_card}{mcp_chart_card}
   </div>
 
 """
@@ -1105,7 +1164,36 @@ def _build_turn_series(raw_session):
 # instead of every session, and annotated = every metric carries an inline one-line explanation
 # (the terminal equivalent of the HTML report's hover tooltips) so the numbers don't need any
 # extra context to reason about.
-def generate_raw_report(sessions, highlight_session=None):
+def _mcp_used_in_str(used_in, project_name_by_path):
+    return ', '.join(f'{project_name_by_path.get(u["project"], u["project"])} ({u["count"]}x)' for u in used_in)
+
+
+def _mcp_lines(mcp_servers, project_name_by_path):
+    if not mcp_servers:
+        return []
+    lines = [
+        '',
+        "MCP SERVERS: a configured server's tool schemas are sent on every turn whether or not it's actually called. "
+        "'global' scope loads in ALL projects, 'local' scope loads in only one. Usage below (call counts) is only what "
+        "these sessions actually show via mcp__<server>__ tool calls, so 'no usage detected' means not observed here, not proven unused",
+    ]
+    for e in mcp_servers:
+        scope_label = 'global' if e['scope'] == 'user' else 'local'
+        if e['status'] == 'move-candidate':
+            move_proj = project_name_by_path.get(e['moveTo'], e['moveTo'])
+            lines.append(
+                f'  [move candidate] {e["server"]} ({scope_label} scope, used in: {_mcp_used_in_str(e["usedIn"], project_name_by_path)}) '
+                f'→ move it to {move_proj}\'s .mcp.json so it stops loading in every other project'
+            )
+        elif e['status'] == 'unused':
+            project_part = f', {_mcp_project_display(e["project"], project_name_by_path)}' if e['scope'] != 'user' else ''
+            lines.append(f'  [unused] {e["server"]} ({scope_label} scope{project_part}, no usage detected)')
+        else:
+            lines.append(f'  {e["server"]} ({scope_label} scope, used in: {_mcp_used_in_str(e["usedIn"], project_name_by_path)}) — fine as-is')
+    return lines
+
+
+def generate_raw_report(sessions, highlight_session=None, mcp_servers=None):
     generated_str = _format_generated(datetime.now())
     total_cost = sum(s['cost'] for s in sessions)
     total_cache_read = sum(s['usage']['cacheRead'] for s in sessions)
@@ -1330,6 +1418,9 @@ def generate_raw_report(sessions, highlight_session=None):
             f'  {r["tool"]}  {_md_escape(r["descriptor"])}  ({r["extra"]} extra calls across {r["sessions"]} session{"s" if r["sessions"] != 1 else ""}, ~{_fmt_big(r["chars"])} chars returned)'
             for r in top_repeated_calls
         ]
+
+    project_name_by_path = {s['projectPath']: s['projectName'] for s in sessions}
+    lines += _mcp_lines(mcp_servers, project_name_by_path)
 
     return '\n'.join(lines) + '\n'
 
