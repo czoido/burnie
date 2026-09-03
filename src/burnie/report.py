@@ -193,7 +193,7 @@ def _session_entry(s, idx, sessions_len, observed_compact_floor):
         'filePath': s['filePath'],
         'title': s.get('title') or s['sessionId'][:8],
         'project': s['projectName'],
-        'date': _fmt_date(s.get('firstTimestamp')),
+        'date': _fmt_date(s.get('lastTimestamp')),
         'firstTimestamp': s.get('firstTimestamp'),
         'model': model,
         'models': models,
