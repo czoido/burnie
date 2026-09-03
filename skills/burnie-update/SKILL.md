@@ -4,7 +4,7 @@ description: Fetch current Claude model prices from anthropic.com/pricing and up
 compatibility: Designed for Claude Code. Requires internet access to anthropic.com/pricing.
 allowed-tools: WebFetch
 metadata:
-  version: "0.1.5"
+  version: "0.1.6"
 ---
 
 Fetch current Claude model prices from anthropic.com/pricing and update `src/burnie/pricing.py`.
@@ -16,7 +16,11 @@ Fetch current Claude model prices from anthropic.com/pricing and update `src/bur
 3. Update `src/burnie/pricing.py`:
    - Replace the `PRICING` list entries with the new values
    - Update `PRICING_UPDATED` to today's date (YYYY-MM-DD format)
-4. Report what changed (which models, old vs new values)
+4. If any price actually changed (not just `PRICING_UPDATED`), bump the version to prepare a release:
+   - Bump the patch version in `pyproject.toml`'s `version`
+   - Bump `metadata.version` in `skills/burnie/SKILL.md` and `skills/burnie-update/SKILL.md` to match
+   - All three must stay in sync, same as a manual release bump
+5. Report what changed (which models, old vs new values, and the new version if bumped)
 
 ## Notes
 
@@ -24,4 +28,5 @@ Fetch current Claude model prices from anthropic.com/pricing and update `src/bur
 - Cache read is typically 0.1× input price
 - If a model from the current list is no longer on the pricing page, keep it but add a comment `# discontinued?`
 - If a new model appears, add it following the same format
-- Only edit `src/burnie/pricing.py`. The other files import from it
+- Only edit `src/burnie/pricing.py` for pricing data. The other files import from it
+- If no prices changed (only `PRICING_UPDATED` moved, or nothing moved at all), don't bump the version

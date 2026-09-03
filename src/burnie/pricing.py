@@ -1,12 +1,14 @@
 # Prices per MTok sourced from https://claude.com/pricing (API pricing table).
 # Cache write has two tiers depending on TTL: 5-minute cache = 1.25x input, 1-hour cache = 2x input.
-# Cache read (hit) = 0.1x input, same for either TTL.
-# Last updated: 2026-07-25
+# Cache read (hit) = 0.1x input, same for either TTL, except Fable 5.1 and Mythos 5.1 which use 0.025x.
+# Last updated: 2026-09-03
 from datetime import datetime
 
-PRICING_UPDATED = '2026-07-25'
+PRICING_UPDATED = '2026-09-03'
 
 PRICING = [
+    {'prefix': 'claude-fable-5-1',  'p': {'input': 10.00, 'output': 50.00, 'cacheWrite5m': 12.50, 'cacheWrite1h': 20.00, 'cacheRead': 0.25}},
+    {'prefix': 'claude-mythos-5-1', 'p': {'input': 10.00, 'output': 50.00, 'cacheWrite5m': 12.50, 'cacheWrite1h': 20.00, 'cacheRead': 0.25}},
     {'prefix': 'claude-fable-5',    'p': {'input': 10.00, 'output': 50.00, 'cacheWrite5m': 12.50, 'cacheWrite1h': 20.00, 'cacheRead': 1.00}},
     {'prefix': 'claude-mythos-5',   'p': {'input': 10.00, 'output': 50.00, 'cacheWrite5m': 12.50, 'cacheWrite1h': 20.00, 'cacheRead': 1.00}},
     {'prefix': 'claude-opus-5',     'p': {'input': 5.00,  'output': 25.00, 'cacheWrite5m': 6.25,  'cacheWrite1h': 10.00, 'cacheRead': 0.50}},
@@ -20,9 +22,8 @@ PRICING = [
     {'prefix': 'claude-opus-4-1',   'p': {'input': 15.00, 'output': 75.00, 'cacheWrite5m': 18.75, 'cacheWrite1h': 30.00, 'cacheRead': 1.50}},  # deprecated
     {'prefix': 'claude-opus-4',     'p': {'input': 15.00, 'output': 75.00, 'cacheWrite5m': 18.75, 'cacheWrite1h': 30.00, 'cacheRead': 1.50}},  # retired except Google Cloud
     {'prefix': 'claude-opus-3',     'p': {'input': 15.00, 'output': 75.00, 'cacheWrite5m': 18.75, 'cacheWrite1h': 30.00, 'cacheRead': 1.50}},  # discontinued?
-    {'prefix': 'claude-sonnet-5', 'from': '2026-09-01', 'p': {'input': 3.00, 'output': 15.00, 'cacheWrite5m': 3.75, 'cacheWrite1h': 6.00, 'cacheRead': 0.30}},
-    {'prefix': 'claude-sonnet-5',                       'p': {'input': 2.00, 'output': 10.00, 'cacheWrite5m': 2.50, 'cacheWrite1h': 4.00, 'cacheRead': 0.20}},  # introductory until 2026-08-31
-    {'prefix': 'claude-sonnet-4',                       'p': {'input': 3.00, 'output': 15.00, 'cacheWrite5m': 3.75, 'cacheWrite1h': 6.00, 'cacheRead': 0.30}},
+    {'prefix': 'claude-sonnet-5',   'p': {'input': 2.00,  'output': 10.00, 'cacheWrite5m': 2.50,  'cacheWrite1h': 4.00,  'cacheRead': 0.20}},
+    {'prefix': 'claude-sonnet-4',   'p': {'input': 3.00,  'output': 15.00, 'cacheWrite5m': 3.75,  'cacheWrite1h': 6.00,  'cacheRead': 0.30}},
     {'prefix': 'claude-sonnet-3-7', 'p': {'input': 3.00,  'output': 15.00, 'cacheWrite5m': 3.75, 'cacheWrite1h': 6.00, 'cacheRead': 0.30}},  # discontinued?
     {'prefix': 'claude-sonnet-3-5', 'p': {'input': 3.00,  'output': 15.00, 'cacheWrite5m': 3.75, 'cacheWrite1h': 6.00, 'cacheRead': 0.30}},  # discontinued?
     {'prefix': 'claude-haiku-4',    'p': {'input': 1.00,  'output': 5.00,  'cacheWrite5m': 1.25,  'cacheWrite1h': 2.00,  'cacheRead': 0.10}},
