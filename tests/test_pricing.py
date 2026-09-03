@@ -1,3 +1,4 @@
+from burnie import pricing as pricing_module
 from burnie.pricing import calc_cost, calc_cost_components, get_context_window, get_model_pricing
 
 
@@ -16,9 +17,13 @@ def test_get_model_pricing_no_model_falls_back_to_default():
     assert get_model_pricing(None)['input'] == 3.00
 
 
-def test_sonnet_5_price_changes_after_introductory_period():
-    before = get_model_pricing('claude-sonnet-5', date='2026-08-31')
-    after = get_model_pricing('claude-sonnet-5', date='2026-09-01')
+def test_pricing_tier_with_from_date_applies_only_on_or_after_it(monkeypatch):
+    monkeypatch.setattr(pricing_module, 'PRICING', [
+        {'prefix': 'claude-test-model', 'from': '2026-09-01', 'p': {'input': 3.00, 'output': 15.00, 'cacheWrite5m': 3.75, 'cacheWrite1h': 6.00, 'cacheRead': 0.30}},
+        {'prefix': 'claude-test-model', 'p': {'input': 2.00, 'output': 10.00, 'cacheWrite5m': 2.50, 'cacheWrite1h': 4.00, 'cacheRead': 0.20}},  # introductory
+    ])
+    before = get_model_pricing('claude-test-model', date='2026-08-31')
+    after = get_model_pricing('claude-test-model', date='2026-09-01')
     assert before['input'] == 2.00
     assert after['input'] == 3.00
 
