@@ -1,12 +1,13 @@
 import argparse
 import base64
+import json
 import shutil
 import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
 
-from .parser import load_all_sessions, load_mcp_servers
+from .parser import _parse_session_file, load_all_sessions, load_mcp_servers
 from .report import generate_report, generate_markdown_report, generate_raw_report
 
 
@@ -56,6 +57,48 @@ def _install_skill():
     print(f'burnie skill installed at {dest_file}')
 
 
+# Dollar thresholds for escalating the flame count: no flame below the first one, so it
+# reads as a warning that kicks in once a session gets pricey, not a badge on every session.
+# Picked against real session costs (median ~$1, p90 ~$14, priciest sessions seen so far ~$140).
+_FLAME_THRESHOLDS = (10, 30, 75, 150)
+
+
+def _flame_count(cost):
+    return sum(cost >= t for t in _FLAME_THRESHOLDS)
+
+
+def _statusline():
+    # Invoked by Claude Code itself as the statusLine command, with a JSON payload on stdin
+    # that includes transcript_path: the active session's own .jsonl file.
+    try:
+        payload = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, TypeError):
+        payload = {}
+    transcript_path = payload.get('transcript_path')
+    try:
+        cost = _parse_session_file(transcript_path)['cost']
+    except (OSError, TypeError, KeyError):
+        cost = 0.0
+    flames = '🔥' * _flame_count(cost)
+    print(f'💰 ${cost:.2f}{" " + flames if flames else ""}')
+
+
+def _install_statusline():
+    settings_path = Path.home() / '.claude' / 'settings.json'
+    settings = {}
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding='utf-8'))
+        except json.JSONDecodeError:
+            print(f"{settings_path} isn't valid JSON, leaving it untouched.")
+            return
+    settings['statusLine'] = {'type': 'command', 'command': 'burnie --statusline', 'padding': 0, 'refreshInterval': 1}
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + '\n', encoding='utf-8')
+    print(f'Statusline installed in {settings_path}.')
+    print("This only shows up in Claude Code's terminal UI, not the VS Code extension. Restart your terminal session to see it.")
+
+
 def _open_in_browser(path):
     opener = 'open' if sys.platform == 'darwin' else 'xdg-open'
     try:
@@ -78,6 +121,14 @@ def _build_parser():
         '--install-skill', action='store_true',
         help='install the /burnie skill into ~/.claude/skills (also /burnie-update, in a repo checkout)',
     )
+    parser.add_argument(
+        '--install-statusline', action='store_true',
+        help="configure Claude Code's statusLine (terminal UI only) to show the active session's running cost",
+    )
+    parser.add_argument(
+        '--statusline', action='store_true',
+        help=argparse.SUPPRESS,  # invoked by Claude Code itself, not meant to be run by hand
+    )
 
     output_mode = parser.add_mutually_exclusive_group()
     output_mode.add_argument('--markdown', action='store_true', help='write a Markdown report instead of HTML')
@@ -94,6 +145,14 @@ def main():
 
     if args.install_skill:
         _install_skill()
+        return
+
+    if args.install_statusline:
+        _install_statusline()
+        return
+
+    if args.statusline:
+        _statusline()
         return
 
     if args.raw:

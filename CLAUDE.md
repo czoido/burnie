@@ -15,6 +15,11 @@ Python package (src-layout), installed/run via `uv`/`uvx`/`pip`, published as `b
 - Tooltips on non-obvious metrics, and a link to `claude.ai/new#settings/usage`
 - `src/burnie/report.py` builds the HTML. The CSS and client-side JS (Chart.js-based) inside it are plain static strings, not templated, so edit them as HTML/JS directly
 
+**Statusline (`src/burnie/cli.py::_statusline`)**
+- `--statusline`: Claude Code's terminal UI (not the VS Code extension, which has no equivalent) invokes this as its `statusLine` command, passing a JSON payload on stdin with `transcript_path` (the active session's own `.jsonl`). Reuses `parser.py`'s `_parse_session_file` for cost, same pricing engine as the report, so the two never disagree. A full re-parse costs ~35ms even on a 7MB transcript, cheap enough to redo every tick rather than tracking an incremental offset.
+- `--install-statusline`: merges a `statusLine` block into `~/.claude/settings.json` (preserving the rest of the file) with `refreshInterval: 1`, so it keeps ticking on a timer during generation, not just after each message.
+- Flame count (`_FLAME_THRESHOLDS`) is dollar-based, not percentile-based: percentile ranking needs all sessions loaded, too slow to redo every second.
+
 ## Data source
 
 Claude Code session files: `~/.claude/projects/<encoded-path>/<session-id>.jsonl`

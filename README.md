@@ -18,6 +18,7 @@
 - **Report:** a visual HTML breakdown of token costs across all your Claude Code sessions, covering total spend, daily average, cache savings, and cost by model and by project.
 - **Inspect:** drill into any session to see what drove the cost, including context growth over time, tool call patterns, agent spawns, repeated operations, and how it compares to similar sessions.
 - **Analyze:** the `/burnie` skill runs a condensed report through Claude for a written, reasoned take on where your cost is coming from and what (if anything) is actually worth changing.
+- **Statusline:** shows the active session's running cost live in Claude Code's terminal UI, escalating 🔥 as it gets pricey.
 
 ## Install
 
@@ -54,6 +55,14 @@ burnie --raw --session <session-id>
 ```
 
 The report is written to `burnie-report.html` in the current directory and opened in your browser. `--markdown` writes `burnie-report.md` instead. `--raw` prints straight to stdout with no file.
+
+### Live cost in your statusline
+
+```bash
+burnie --install-statusline
+```
+
+Configures Claude Code's `statusLine` to show the active session's running cost, refreshed every second, e.g. `💰 $12.40 🔥🔥`. This only works in Claude Code's **terminal** UI, not the VS Code extension (it has no equivalent status surface for this).
 
 ## Cost & privacy
 
