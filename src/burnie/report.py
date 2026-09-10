@@ -1542,9 +1542,16 @@ _STATIC_HEAD = """<!DOCTYPE html>
   .table-scroll th, .table-scroll td { white-space: nowrap; }
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
   td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  /* Cost is the last column and the table scrolls horizontally on narrow viewports, so pin it to
+     the right edge instead of letting it get clipped off-screen. The sticky cell needs an opaque
+     background matching whatever the row's current state paints, or the scrolled-away columns
+     would show through underneath it. */
+  .table-scroll th:last-child, .table-scroll tr:not(.detail-row) td:last-child { position: sticky; right: 0; background: var(--surface); box-shadow: -6px 0 6px -6px rgba(0, 0, 0, 0.15); }
   .session-row { cursor: pointer; }
   .session-row:hover td { background: var(--surface2); }
+  .session-row:hover td:last-child { background: var(--surface2); }
   .session-row.highlighted td { background: var(--surface2); border-left: 3px solid var(--accent); }
+  .session-row.highlighted td:last-child { background: var(--surface2); }
   .session-row td:first-child { width: 28px; color: var(--muted); font-size: 16px; user-select: none; }
   .detail-row td { padding: 0; border-bottom: 1px solid var(--border); }
   .detail-inner { padding: 16px 48px 20px; background: var(--surface3); display: none; }
