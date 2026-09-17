@@ -1,10 +1,10 @@
 # Prices per MTok sourced from https://claude.com/pricing (API pricing table).
 # Cache write has two tiers depending on TTL: 5-minute cache = 1.25x input, 1-hour cache = 2x input.
 # Cache read (hit) = 0.1x input, same for either TTL, except Fable 5.1 and Mythos 5.1 which use 0.025x.
-# Last updated: 2026-09-03
+# Last updated: 2026-09-17
 from datetime import datetime
 
-PRICING_UPDATED = '2026-09-03'
+PRICING_UPDATED = '2026-09-17'
 
 PRICING = [
     {'prefix': 'claude-fable-5-1',  'p': {'input': 10.00, 'output': 50.00, 'cacheWrite5m': 12.50, 'cacheWrite1h': 20.00, 'cacheRead': 0.25}},
