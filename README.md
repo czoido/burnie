@@ -64,6 +64,10 @@ burnie --install-statusline
 
 Configures Claude Code's `statusLine` to show the active session's running cost, refreshed every second, e.g. `💰 $12.40 🔥🔥`. This only works in Claude Code's **terminal** UI, not the VS Code extension (it has no equivalent status surface for this).
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/czoido/burnie/main/assets/statusline.png" alt="burnie statusline showing 💰 $12.40 with two flame emoji" width="500" />
+</p>
+
 ## Cost & privacy
 
 - **The dollar figures are API-equivalent costs**, from Anthropic's published API rates. They are *not* necessarily what a Pro or Max plan bills you. Read them as "what this usage would cost at API prices," good for comparing sessions, not an invoice.
