@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>burnie — Claude Code cost analytics</title>
+<meta name="description" content="A local cost analytics tool for Claude Code. See what your sessions actually cost, which ones were abnormally expensive, and why.">
+<meta property="og:title" content="burnie">
+<meta property="og:description" content="A local cost analytics tool for Claude Code. See what your sessions actually cost, which ones were abnormally expensive, and why.">
+<meta property="og:image" content="assets/report.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/burnie-icon.png">
+<style>
+  :root[data-theme="dark"] {
+    --bg: #0f0f13; --surface: #1a1a24; --surface2: #22223a; --surface3: #1e1e30;
+    --border: #2e2e45; --text: #e2e2f0; --muted: #8888aa;
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f5fa; --surface: #ffffff; --surface2: #eeeef6; --surface3: #f0f0f8;
+    --border: #d4d4e8; --text: #1a1a2e; --muted: #666688;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f0f13; --surface: #1a1a24; --surface2: #22223a; --surface3: #1e1e30;
+      --border: #2e2e45; --text: #e2e2f0; --muted: #8888aa;
+    }
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f5f5fa; --surface: #ffffff; --surface2: #eeeef6; --surface3: #f0f0f8;
+      --border: #d4d4e8; --text: #1a1a2e; --muted: #666688;
+    }
+  }
+  :root { --accent: #6366f1; --accent2: #a78bfa; --green: #10b981; --amber: #f59e0b; --cyan: #06b6d4; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.6; transition: background 0.2s, color 0.2s;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px; }
+
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; text-decoration: none; }
+  .brand img { width: 22px; height: 22px; }
+  .nav-links { display: flex; align-items: center; gap: 18px; font-size: 14px; }
+  .nav-links a { text-decoration: none; color: var(--muted); }
+  .nav-links a:hover { color: var(--text); }
+  .theme-btn {
+    background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+  }
+  .theme-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  header.hero { text-align: center; padding: 60px 0 40px; }
+  .hero img.icon { width: 64px; height: 64px; margin-bottom: 16px; }
+  .hero h1 {
+    font-size: 44px; font-weight: 800; margin: 0 0 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .hero .tagline { font-size: 18px; color: var(--muted); margin: 0 0 20px; font-style: italic; }
+  .hero .desc { font-size: 16px; max-width: 560px; margin: 0 auto 32px; color: var(--text); }
+
+  .cta-row { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .install-box {
+    display: flex; align-items: center; gap: 10px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px;
+  }
+  .install-box .copy-btn {
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px;
+    padding: 2px 6px; border-radius: 6px;
+  }
+  .install-box .copy-btn:hover { color: var(--text); background: var(--surface3); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+    border-radius: 10px; padding: 11px 18px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--border); color: var(--text); background: var(--surface);
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent2); border-color: var(--accent2); }
+
+  .shot-frame {
+    margin: 40px 0 60px; border-radius: 14px; border: 1px solid var(--border);
+    background: var(--surface); box-shadow: 0 30px 60px -20px rgba(0,0,0,0.35);
+    overflow: hidden;
+  }
+  .shot-topbar { display: flex; gap: 6px; padding: 12px 14px; background: var(--surface2); border-bottom: 1px solid var(--border); }
+  .shot-topbar span { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+  .shot-frame img { display: block; width: 100%; }
+
+  section { padding: 20px 0 50px; }
+  section h2 {
+    font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.1em; text-align: center; margin: 0 0 28px;
+  }
+  .feature-list { list-style: none; margin: 0; padding: 0; }
+  .feature-list li {
+    padding: 8px 0; font-size: 14px; color: var(--muted);
+  }
+  .feature-list li strong { color: var(--text); }
+  .statusline-shot {
+    max-width: 480px; width: 100%; border-radius: 8px; border: 1px solid var(--border);
+    margin: 14px 0 0; display: block;
+  }
+
+  .code-block {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13.5px; overflow-x: auto; margin: 0 0 14px;
+    white-space: pre; line-height: 1.7;
+  }
+  .code-block .comment { color: var(--muted); }
+
+  .callout { color: var(--muted); font-size: 14px; }
+  .callout p { margin: 0 0 10px; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  footer {
+    border-top: 1px solid var(--border); padding: 28px 0 40px; text-align: center;
+    color: var(--muted); font-size: 13px;
+  }
+  footer a { text-decoration: none; color: var(--muted); }
+  footer a:hover { color: var(--text); }
+  footer .links { display: flex; gap: 16px; justify-content: center; margin-bottom: 10px; }
+
+  @media (max-width: 600px) {
+    .hero h1 { font-size: 34px; }
+    .install-box { font-size: 12.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#">
+      <img src="assets/burnie-icon.png" alt="">
+      burnie
+    </a>
+    <div class="nav-links">
+      <button class="theme-btn" id="theme-toggle" type="button">🌙 Dark</button>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <img class="icon" src="assets/burnie-icon.png" alt="burnie mascot">
+    <h1>burnie</h1>
+    <p class="tagline">Some agents just want to watch your tokens burn.</p>
+    <p class="desc">
+      A local cost analytics tool for Claude Code. It tells you not just how much your
+      sessions cost, but which ones were abnormally expensive, and why.
+    </p>
+    <div class="cta-row">
+      <div class="install-box">
+        <span>uvx burnie</span>
+        <button class="copy-btn" data-copy="uvx burnie" type="button">copy</button>
+      </div>
+      <a class="btn primary" href="https://github.com/czoido/burnie" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </header>
+
+  <div class="shot-frame">
+    <div class="shot-topbar"><span></span><span></span><span></span></div>
+    <img src="assets/report.png" alt="burnie HTML report showing total cost, cost by model, daily cost chart, cost by project, and session list">
+  </div>
+
+  <section>
+    <h2>What it does</h2>
+    <ul class="feature-list">
+      <li><strong>Report:</strong> a visual HTML breakdown of token costs, total spend, daily average, cache savings, cost by model and by project.</li>
+      <li><strong>Inspect:</strong> drill into any session to see what drove the cost, and how it compares to similar sessions.</li>
+      <li><strong>Analyze:</strong> the <code>/burnie</code> skill runs the report through Claude for a written take on what's actually worth changing.</li>
+      <li><strong>Statusline:</strong> the active session's running cost live in Claude Code's terminal UI, escalating 🔥 as it gets pricey.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <div class="code-block"><span class="comment"># run without installing</span>
+uvx burnie
+
+<span class="comment"># get the /burnie skill into Claude Code</span>
+burnie --install-skill
+
+<span class="comment"># live cost counter in your terminal status line</span>
+burnie --install-statusline</div>
+    <img class="statusline-shot" src="assets/statusline.png" alt="Claude Code terminal status line showing 💰 $12.40 with two flame emoji next to auto mode on">
+  </section>
+
+  <section>
+    <h2>Cost &amp; privacy</h2>
+    <div class="callout">
+      <p>The dollar figures are API-equivalent costs from Anthropic's published rates, not necessarily what a Pro or Max plan bills you. Good for comparing sessions, not an invoice.</p>
+      <p>Everything runs on your machine. No API key, no account access, no data leaves your computer.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="links">
+      <a href="https://github.com/czoido/burnie" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://pypi.org/project/burnie/" target="_blank" rel="noopener">PyPI</a>
+      <a href="https://github.com/czoido/burnie/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    </div>
+    <div>Built by <a href="https://github.com/czoido" target="_blank" rel="noopener">@czoido</a></div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById('theme-toggle');
+
+  function apply(theme) {
+    if (theme) { root.setAttribute('data-theme', theme); }
+    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var effective = theme || (prefersDark ? 'dark' : 'light');
+    btn.textContent = effective === 'dark' ? '🌙 Dark' : '☀️ Light';
+  }
+
+  var saved = null;
+  try { saved = localStorage.getItem('burnie-site-theme'); } catch (e) {}
+  apply(saved);
+
+  btn.addEventListener('click', function () {
+    var current = root.getAttribute('data-theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var next = current === 'dark' ? 'light' : 'dark';
+    apply(next);
+    try { localStorage.setItem('burnie-site-theme', next); } catch (e) {}
+  });
+
+  document.querySelectorAll('.copy-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = b.getAttribute('data-copy');
+      navigator.clipboard.writeText(text).then(function () {
+        var original = b.textContent;
+        b.textContent = 'copied';
+        setTimeout(function () { b.textContent = original; }, 1200);
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
