@@ -4,7 +4,7 @@ description: Fetch current Claude model prices from anthropic.com/pricing and up
 compatibility: Designed for Claude Code. Requires internet access to anthropic.com/pricing.
 allowed-tools: WebFetch
 metadata:
-  version: "0.1.9"
+  version: "0.1.10"
 ---
 
 Fetch current Claude model prices from anthropic.com/pricing and update `src/burnie/pricing.py`.

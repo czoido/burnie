@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from importlib import resources
 from pathlib import Path
 
@@ -114,7 +115,7 @@ def _build_parser():
     )
     parser.add_argument(
         'output_file', nargs='?', default=None,
-        help='output file path (default: burnie-report.html, or burnie-report.md with --markdown)',
+        help='output file path (default: burnie-report.html, or burnie-report.md with --markdown, written to the OS temp dir)',
     )
     parser.add_argument('--session', metavar='ID', help='highlight a specific session in the report')
     parser.add_argument(
@@ -160,7 +161,8 @@ def main():
         print(generate_raw_report(sessions, highlight_session=args.session, mcp_servers=load_mcp_servers(sessions)))
         return
 
-    out_file = args.output_file or ('burnie-report.md' if args.markdown else 'burnie-report.html')
+    default_name = 'burnie-report.md' if args.markdown else 'burnie-report.html'
+    out_file = args.output_file or str(Path(tempfile.gettempdir()) / default_name)
     out_path = Path(out_file).resolve()
 
     print('Reading Claude Code sessions...')
